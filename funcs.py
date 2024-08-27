@@ -254,11 +254,10 @@ def add_annotations(pdf_path: str, cites: Dict[str, str], locations: Dict[str, D
                     if page in summaries.get(cite, {}) and i < len(summaries[cite][page]):
                         annotation = Text(text=re.sub("\n", "", summaries[cite][page][i]), rect=rect)
                         writer.add_annotation(page_number=page, annotation=annotation)
-
-        with open("annotated.pdf", "wb") as fp:
+        newpath = re.sub(r"\W+", "", pdf_path[:-4]) + "-annotated.pdf"
+        with open(newpath, "wb") as fp:
             writer.write(fp)
         logger.info("Successfully created annotated PDF.")
+        return newpath
     except Exception as e:
         logger.error(f"Error adding annotations to {pdf_path}: {str(e)}")
-
-# Main execution flow can be organized here
