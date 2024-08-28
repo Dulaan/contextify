@@ -1,5 +1,3 @@
 
-__pycache__/gpt_funcs.cpython-312.pyc
-__pycache__/funcs.cpython-312.pyc
-__pycache__/pdf_funcs.cpython-312.pyc
-__pycache__/your_module.cpython-312.pyc
+venv/
+__pycache__/funcs.cpython-310.pyc

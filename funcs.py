@@ -7,7 +7,7 @@ import logging
 import pymupdf
 from pypdf import PdfReader, PdfWriter
 from pypdf.annotations import Text
-from serpapi.google_scholar_search import GoogleScholarSearch
+from serpapi import Client
 from groq import Groq
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import CharacterTextSplitter
@@ -23,6 +23,7 @@ CHUNK_OVERLAP = 50
 MAX_TOKENS = 1024
 TEMPERATURE = 0.5
 
+
 def extract_citations(pdf_path: str) -> Dict[str, str]:
     """Extract citations from a PDF file."""
     cites = {}
@@ -37,18 +38,22 @@ def extract_citations(pdf_path: str) -> Dict[str, str]:
 
         for cite, info in reader.named_destinations.items():
             if cite.startswith("cite"):
-                x1, y1 = info["/Left"], height - info['/Top']
+                x1, y1 = info["/Left"], height - info["/Top"]
                 rect = pymupdf.Rect(x1, y1, x1 + 400, y1 + 20)
-                page_index = next((i for i, page in enumerate(reader.pages) if page == info["/Page"]), None)
+                page_index = next(
+                    (i for i, page in enumerate(reader.pages) if page == info["/Page"]),
+                    None,
+                )
                 if page_index is not None:
                     cites[cite] = doc[page_index].get_textbox(rect)
     except Exception as e:
         logger.error(f"Error extracting citations from {pdf_path}: {str(e)}")
     return cites
 
+
 def create_folder(pdf_path: str) -> str:
     """Create a folder for storing reference documents."""
-    title = re.sub(r"\W+", "", pdf_path[:-4]) + "_refs"
+    title = "temp"
     try:
         os.makedirs(title, exist_ok=True)
     except Exception as e:
@@ -56,18 +61,17 @@ def create_folder(pdf_path: str) -> str:
         raise
     return title
 
-def download_document(folder: str, title: str, cite: str) -> Optional[str]:
+
+def download_document(
+    folder: str, title: str, cite: str, client: object
+) -> Optional[str]:
     """Download a document from Google Scholar."""
-    api_key = os.environ.get("SERP_API_KEY")
-    if not api_key:
-        logger.error("SERP API key not found in environment variables.")
-        return None
 
     filename = re.sub(r"\W+", "", cite[5:])
 
     try:
-        search = GoogleScholarSearch({"q": title, "api_key": api_key})
-        results = search.get_dict().get("organic_results", [])
+        search = client.search({"engine": "google_scholar", "q": title})
+        results = search.as_dict().get("organic_results", [])
         if not results:
             logger.warning(f"No results found for {title}")
             return None
@@ -80,7 +84,7 @@ def download_document(folder: str, title: str, cite: str) -> Optional[str]:
         response = requests.get(url, timeout=30)
         response.raise_for_status()
 
-        file_path = os.path.join("/content", folder, f"{filename}.pdf")
+        file_path = os.path.join(folder, f"{filename}.pdf")
         with open(file_path, "wb") as f:
             f.write(response.content)
 
@@ -92,10 +96,17 @@ def download_document(folder: str, title: str, cite: str) -> Optional[str]:
 
     return None
 
+
 def download_all_documents(folder: str, cites: Dict[str, str]) -> None:
+    api_key = os.environ.get("SERP_API_KEY")
+    if not api_key:
+        logger.error("SERP API key not found in environment variables.")
+        return None
+    client = Client(api_key=api_key)
     """Download all cited documents."""
     for cite, title in cites.items():
-        download_document(folder, title, cite)
+        download_document(folder, title, cite, client)
+
 
 def extract_text(file_path: str) -> str:
     """Extract text from a PDF file."""
@@ -107,9 +118,11 @@ def extract_text(file_path: str) -> str:
         logger.error(f"Error extracting text from {file_path}: {str(e)}")
         return ""
 
+
 def create_summary_prompt(text: str, context: str) -> str:
     """Create a prompt for summarizing a passage with context."""
     return f'Explain the following passage: "{text}" using this context from the paper cited: "{context}". CONTEXTUALIZE: '
+
 
 def summarize_text(client: Groq, text: str) -> Optional[str]:
     """Summarize text using the Groq API."""
@@ -134,12 +147,18 @@ def summarize_text(client: Groq, text: str) -> Optional[str]:
         logger.error(f"Error summarizing text: {str(e)}")
         return None
 
-def summarize_paper_with_context(client: Groq, text: str, ref_ctx: str) -> Optional[str]:
+
+def summarize_paper_with_context(
+    client: Groq, text: str, ref_ctx: str
+) -> Optional[str]:
     """Summarize a paper passage with reference context."""
     prompt = create_summary_prompt(text, ref_ctx)
     return summarize_text(client, prompt)
 
-def extract_citation_locations(pdf_path: str, cites: Dict[str, str]) -> Dict[str, Dict[int, List[List[float]]]]:
+
+def extract_citation_locations(
+    pdf_path: str, cites: Dict[str, str]
+) -> Dict[str, Dict[int, List[List[float]]]]:
     """Extract citation locations from a PDF file."""
     locs = {cite: {} for cite in cites}
     try:
@@ -162,7 +181,10 @@ def extract_citation_locations(pdf_path: str, cites: Dict[str, str]) -> Dict[str
 
     return locs
 
-def extract_citation_context(pdf_path: str, cites: Dict[str, str]) -> Dict[str, Dict[int, List[str]]]:
+
+def extract_citation_context(
+    pdf_path: str, cites: Dict[str, str]
+) -> Dict[str, Dict[int, List[str]]]:
     """Extract citation context from a PDF file."""
     cite_dict = {cite: {} for cite in cites}
     try:
@@ -180,7 +202,9 @@ def extract_citation_context(pdf_path: str, cites: Dict[str, str]) -> Dict[str, 
                         cite_ref = obj.get("/A", {}).get("/D")
                         if cite_ref in cites:
                             info = obj.get("/Rect", [0, 0, 0, 0])
-                            rect = pymupdf.Rect(100, 792 - info[1] - 10, 500, 792 - info[1] + 15)
+                            rect = pymupdf.Rect(
+                                100, 792 - info[1] - 10, 500, 792 - info[1] + 15
+                            )
                             text = re.sub("\n", " ", doc[page_num].get_textbox(rect))
                             if page_num not in cite_dict[cite_ref]:
                                 cite_dict[cite_ref][page_num] = []
@@ -190,15 +214,22 @@ def extract_citation_context(pdf_path: str, cites: Dict[str, str]) -> Dict[str, 
 
     return cite_dict
 
+
 def initialize_retriever(folder: str) -> Optional[FAISS]:
     """Initialize a FAISS retriever for document search."""
     try:
-        docs = [extract_text(os.path.join(folder, file)) for file in os.listdir(folder) if file.endswith('.pdf')]
+        docs = [
+            extract_text(os.path.join(folder, file))
+            for file in os.listdir(folder)
+            if file.endswith(".pdf")
+        ]
         if not docs:
             logger.warning(f"No PDF documents found in {folder}")
             return None
 
-        text_splitter = CharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, separator=" ")
+        text_splitter = CharacterTextSplitter(
+            chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, separator=" "
+        )
         texts = text_splitter.create_documents(docs)
         embeddings = HuggingFaceEmbeddings()
         db = FAISS.from_documents(texts, embeddings)
@@ -207,7 +238,10 @@ def initialize_retriever(folder: str) -> Optional[FAISS]:
         logger.error(f"Error initializing retriever for {folder}: {str(e)}")
         return None
 
-def generate_summaries(folder_path: str, ctx: Dict[str, Dict[int, List[str]]]) -> Dict[str, Dict[int, List[str]]]:
+
+def generate_summaries(
+    folder_path: str, ctx: Dict[str, Dict[int, List[str]]]
+) -> Dict[str, Dict[int, List[str]]]:
     """Generate summaries for citation contexts."""
     summaries = {}
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
@@ -233,13 +267,23 @@ def generate_summaries(folder_path: str, ctx: Dict[str, Dict[int, List[str]]]) -
                         summaries[cite][page].append(summary)
                         logger.info(f"Generated summary for {cite} on page {page}")
                     else:
-                        logger.warning(f"Failed to generate summary for {cite} on page {page}")
+                        logger.warning(
+                            f"Failed to generate summary for {cite} on page {page}"
+                        )
                 except Exception as e:
-                    logger.error(f"Error generating summary for {cite} on page {page}: {str(e)}")
+                    logger.error(
+                        f"Error generating summary for {cite} on page {page}: {str(e)}"
+                    )
 
     return summaries
 
-def add_annotations(pdf_path: str, cites: Dict[str, str], locations: Dict[str, Dict[int, List[List[float]]]], summaries: Dict[str, Dict[int, List[str]]]) -> None:
+
+def add_annotations(
+    pdf_path: str,
+    cites: Dict[str, str],
+    locations: Dict[str, Dict[int, List[List[float]]]],
+    summaries: Dict[str, Dict[int, List[str]]],
+) -> None:
     """Add annotations to a PDF file."""
     try:
         reader = PdfReader(pdf_path)
@@ -251,13 +295,21 @@ def add_annotations(pdf_path: str, cites: Dict[str, str], locations: Dict[str, D
         for cite in cites:
             for page, coords in locations.get(cite, {}).items():
                 for i, rect in enumerate(coords):
-                    if page in summaries.get(cite, {}) and i < len(summaries[cite][page]):
-                        annotation = Text(text=re.sub("\n", "", summaries[cite][page][i]), rect=rect)
+                    if page in summaries.get(cite, {}) and i < len(
+                        summaries[cite][page]
+                    ):
+                        annotation = Text(
+                            text=re.sub("\n", "", summaries[cite][page][i]), rect=rect
+                        )
                         writer.add_annotation(page_number=page, annotation=annotation)
-        newpath = re.sub(r"\W+", "", pdf_path[:-4]) + "-annotated.pdf"
-        with open(newpath, "wb") as fp:
+        with open("annotated.pdf", "wb") as fp:
             writer.write(fp)
         logger.info("Successfully created annotated PDF.")
-        return newpath
+        return "annotated.pdf"
     except Exception as e:
         logger.error(f"Error adding annotations to {pdf_path}: {str(e)}")
+
+def delete_folder(folder_path):
+    for file in os.listdir(folder_path):
+        os.remove(file)
+    os.rmdir(folder_path)
