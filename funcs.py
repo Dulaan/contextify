@@ -309,7 +309,8 @@ def add_annotations(
     except Exception as e:
         logger.error(f"Error adding annotations to {pdf_path}: {str(e)}")
 
+
 def delete_folder(folder_path):
     for file in os.listdir(folder_path):
-        os.remove(file)
+        os.remove(folder_path + "/" + file)
     os.rmdir(folder_path)
