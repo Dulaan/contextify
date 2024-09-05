@@ -1,7 +1,7 @@
-from tkinter import *
-from tkinter.ttk import *
+import os
+from tkinter import Tk, Entry, Button, Label, Toplevel, mainloop
 from tkinter.filedialog import askopenfile
-from funcs import *
+from funcs import extract_citations, create_folder, download_all_documents, extract_citation_locations, extract_citation_context, generate_summaries, add_annotations, delete_folder
 
 
 def main(pdf_path):
@@ -48,7 +48,7 @@ def open_file():
             top = Toplevel(root)
             top.geometry("750x250")
             top.title("Error")
-            Label(top, text=e, font=("Mistral 18 bold")).place(x=150, y=80)
+            Label(top, text=str(e), font=("Mistral 18 bold")).place(x=150, y=80)
 
 
 Label(root, text="Serp API key").grid(row=0)

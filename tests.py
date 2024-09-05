@@ -1,9 +1,10 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from funcs import extract_citations, download_document 
+from funcs import extract_citations, download_document
+import logging
+
 
 class TestExtractCitations(unittest.TestCase):
-    
     @patch("funcs.PdfReader")  # Mock PdfReader
     @patch("funcs.pymupdf.open")  # Mock pymupdf.open
     def test_extract_citations_normal_case(self, mock_pymupdf_open, mock_PdfReader):
@@ -25,9 +26,11 @@ class TestExtractCitations(unittest.TestCase):
 
         # Call the function and check the result
         pdf_path = "dummy.pdf"
-        expected_output = {"cite1": "Citation text"}  # Assuming the regex cleans up the text
+        expected_output = {
+            "cite1": "Citation text"
+        }  # Assuming the regex cleans up the text
         result = extract_citations(pdf_path)
-        
+
         self.assertEqual(result, expected_output)
 
         # Verify interactions
@@ -50,7 +53,7 @@ class TestExtractCitations(unittest.TestCase):
 
         pdf_path = "no_citations.pdf"
         result = extract_citations(pdf_path)
-        
+
         # Expected to return an empty dictionary since there are no citations
         self.assertEqual(result, {})
 
@@ -65,30 +68,32 @@ class TestExtractCitations(unittest.TestCase):
         # Mock the PdfReader to raise an exception
         mock_PdfReader.side_effect = Exception("Test exception")
 
+        mock_pymupdf_open.return_value = MagicMock()
+
         pdf_path = "error.pdf"
         result = extract_citations(pdf_path)
-        
+
         # Expected to return an empty dictionary due to the exception
         self.assertEqual(result, {})
 
         # Verify that the exception was raised and handled
         mock_PdfReader.assert_called_once_with(pdf_path)
 
+
 class TestDownloadDocument(unittest.TestCase):
-    
     @patch("funcs.requests.get")  # Mock requests.get
     @patch("funcs.os.path.join")  # Mock os.path.join
     @patch("builtins.open")
-    def test_download_document_success(self, mock_open, mock_path_join, mock_requests_get):
+    def test_download_document_success(
+        self, mock_open, mock_path_join, mock_requests_get
+    ):
         """Test a successful document download."""
         # Mock the client search response
         mock_open = MagicMock()
         mock_open.write.return_value = "example_doc"
         mock_client = MagicMock()
         mock_client.search.return_value.as_dict.return_value = {
-            "organic_results": [
-                {"resources": [{"link": "http://example.com/doc.pdf"}]}
-            ]
+            "organic_results": [{"resources": [{"link": "http://example.com/doc.pdf"}]}]
         }
 
         # Mock the requests.get response
@@ -110,20 +115,24 @@ class TestDownloadDocument(unittest.TestCase):
         self.assertEqual(result, "example_citation.pdf")
 
         # Verify interactions
-        mock_client.search.assert_called_once_with({"engine": "google_scholar", "q": title})
-        mock_requests_get.assert_called_once_with("http://example.com/doc.pdf", timeout=30)
+        mock_client.search.assert_called_once_with(
+            {"engine": "google_scholar", "q": title}
+        )
+        mock_requests_get.assert_called_once_with(
+            "http://example.com/doc.pdf", timeout=30
+        )
         mock_path_join.assert_called_once_with(folder, "example_citation.pdf")
 
     @patch("funcs.requests.get")
     @patch("funcs.os.path.join")
     @patch("builtins.open")
-    def test_download_document_no_results(self, mock_open, mock_path_join, mock_requests_get):
+    def test_download_document_no_results(
+        self, mock_open, mock_path_join, mock_requests_get
+    ):
         """Test when no results are returned from the search."""
         # Mock the client search response to return no results
         mock_client = MagicMock()
-        mock_client.search.return_value.as_dict.return_value = {
-            "organic_results": []
-        }
+        mock_client.search.return_value.as_dict.return_value = {"organic_results": []}
 
         folder = "/mock_folder"
         title = "Nonexistent Document"
@@ -135,8 +144,33 @@ class TestDownloadDocument(unittest.TestCase):
         self.assertIsNone(result)
 
         # Verify interactions
-        mock_client.search.assert_called_once_with({"engine": "google_scholar", "q": title})
+        mock_client.search.assert_called_once_with(
+            {"engine": "google_scholar", "q": title}
+        )
         mock_requests_get.assert_not_called()  # No download should happen
 
+    @patch("funcs.requests.get")
+    @patch("funcs.os.path.join")
+    @patch("builtins.open")
+    def test_download_document_exception(
+            self, mock_open, mock_path_join, mock_requests_get
+    ):
+        """Test when an exception occurs during the download process."""
+        # Mock the client search response to return an error.
+        mock_client = MagicMock()
+        mock_client.search.side_effect = Exception("Test exception")
+
+        folder = "/mock_folder"
+        title = "Error Document"
+        cite = "cite:error"
+
+        result = download_document(folder, title, cite, mock_client)
+
+        self.assertIsNone(result)
+
+        
+
 if __name__ == "__main__":
+    logging.disable(logging.CRITICAL)
     unittest.main()
+    logging.disable(logging.NOTSET)

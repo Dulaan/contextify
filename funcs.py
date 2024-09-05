@@ -63,7 +63,7 @@ def create_folder(pdf_path: str) -> str:
 
 
 def download_document(
-    folder: str, title: str, cite: str, client: object
+    folder: str, title: str, cite: str, client: Client
 ) -> Optional[str]:
     """Download a document from Google Scholar."""
 
@@ -283,7 +283,7 @@ def add_annotations(
     cites: Dict[str, str],
     locations: Dict[str, Dict[int, List[List[float]]]],
     summaries: Dict[str, Dict[int, List[str]]],
-) -> None:
+) ->Optional[str]:
     """Add annotations to a PDF file."""
     try:
         reader = PdfReader(pdf_path)
