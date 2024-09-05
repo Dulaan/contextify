@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from funcs import extract_citations  # Replace with the actual module name
+from funcs import extract_citations, download_document 
 
 class TestExtractCitations(unittest.TestCase):
     
@@ -73,6 +73,70 @@ class TestExtractCitations(unittest.TestCase):
 
         # Verify that the exception was raised and handled
         mock_PdfReader.assert_called_once_with(pdf_path)
+
+class TestDownloadDocument(unittest.TestCase):
+    
+    @patch("funcs.requests.get")  # Mock requests.get
+    @patch("funcs.os.path.join")  # Mock os.path.join
+    @patch("builtins.open")
+    def test_download_document_success(self, mock_open, mock_path_join, mock_requests_get):
+        """Test a successful document download."""
+        # Mock the client search response
+        mock_open = MagicMock()
+        mock_open.write.return_value = "example_doc"
+        mock_client = MagicMock()
+        mock_client.search.return_value.as_dict.return_value = {
+            "organic_results": [
+                {"resources": [{"link": "http://example.com/doc.pdf"}]}
+            ]
+        }
+
+        # Mock the requests.get response
+        mock_response = MagicMock()
+        mock_response.content = b"PDF content"
+        mock_response.raise_for_status.return_value = None
+        mock_requests_get.return_value = mock_response
+
+        # Mock the os.path.join behavior
+        mock_path_join.return_value = "/mock_folder/mock_filename.pdf"
+
+        folder = "/mock_folder"
+        title = "Sample Document"
+        cite = "cite:example_citation"
+
+        result = download_document(folder, title, cite, mock_client)
+
+        # Assert the expected filename is returned
+        self.assertEqual(result, "example_citation.pdf")
+
+        # Verify interactions
+        mock_client.search.assert_called_once_with({"engine": "google_scholar", "q": title})
+        mock_requests_get.assert_called_once_with("http://example.com/doc.pdf", timeout=30)
+        mock_path_join.assert_called_once_with(folder, "example_citation.pdf")
+
+    @patch("funcs.requests.get")
+    @patch("funcs.os.path.join")
+    @patch("builtins.open")
+    def test_download_document_no_results(self, mock_open, mock_path_join, mock_requests_get):
+        """Test when no results are returned from the search."""
+        # Mock the client search response to return no results
+        mock_client = MagicMock()
+        mock_client.search.return_value.as_dict.return_value = {
+            "organic_results": []
+        }
+
+        folder = "/mock_folder"
+        title = "Nonexistent Document"
+        cite = "cite:no_results"
+
+        result = download_document(folder, title, cite, mock_client)
+
+        # Assert that None is returned because no results were found
+        self.assertIsNone(result)
+
+        # Verify interactions
+        mock_client.search.assert_called_once_with({"engine": "google_scholar", "q": title})
+        mock_requests_get.assert_not_called()  # No download should happen
 
 if __name__ == "__main__":
     unittest.main()
