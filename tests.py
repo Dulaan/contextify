@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from funcs import extract_citations, download_document
+from funcs import extract_citations, download_document, extract_text
 import logging
 
 
@@ -124,10 +124,8 @@ class TestDownloadDocument(unittest.TestCase):
         mock_path_join.assert_called_once_with(folder, "example_citation.pdf")
 
     @patch("funcs.requests.get")
-    @patch("funcs.os.path.join")
-    @patch("builtins.open")
     def test_download_document_no_results(
-        self, mock_open, mock_path_join, mock_requests_get
+        self, mock_requests_get
     ):
         """Test when no results are returned from the search."""
         # Mock the client search response to return no results
@@ -149,12 +147,8 @@ class TestDownloadDocument(unittest.TestCase):
         )
         mock_requests_get.assert_not_called()  # No download should happen
 
-    @patch("funcs.requests.get")
-    @patch("funcs.os.path.join")
-    @patch("builtins.open")
-    def test_download_document_exception(
-            self, mock_open, mock_path_join, mock_requests_get
-    ):
+
+    def test_download_document_exception(self):
         """Test when an exception occurs during the download process."""
         # Mock the client search response to return an error.
         mock_client = MagicMock()
@@ -168,9 +162,20 @@ class TestDownloadDocument(unittest.TestCase):
 
         self.assertIsNone(result)
 
-        
+
+class TestExtractText(unittest.TestCase):
+    @patch("funcs.PdfReader")
+    def test_extract_text(self, mock_PdfReader):
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "example page"
+        mock_reader = MagicMock()
+        mock_reader.pages = [mock_page]
+        mock_PdfReader.return_value = mock_reader
+
+        file_path = "example.pdf"
+        result = extract_text(file_path)
+        mock_PdfReader.assert_called_once_with(file_path)
+        self.assertEqual(result, "example page")
 
 if __name__ == "__main__":
-    logging.disable(logging.CRITICAL)
     unittest.main()
-    logging.disable(logging.NOTSET)
