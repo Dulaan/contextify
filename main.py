@@ -9,10 +9,6 @@ def main(pdf_path):
 
     cites = extract_citations(pdf_path)
 
-    # test with one
-    cite, title = list(cites.items())[0]
-    cites = {cite: title}
-
     download_all_documents(folder_path, cites)
 
     locs = extract_citation_locations(pdf_path, cites)

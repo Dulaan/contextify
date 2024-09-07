@@ -1,7 +1,7 @@
 import os
 import re
 import requests
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional
 import logging
 
 import pymupdf
