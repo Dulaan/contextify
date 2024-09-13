@@ -1,17 +1,18 @@
 import os
 import re
 import requests
-from typing import Dict, List, Optional
+from typing import Dict, List, Tuple, Optional, Any
 import logging
-
+import torch
+import io
+from sentence_transformers import SentenceTransformer
+from sentence_transformers.util import semantic_search
 import pymupdf
 from pypdf import PdfReader, PdfWriter
 from pypdf.annotations import Text
 from serpapi import Client
 from groq import Groq
-from langchain_community.vectorstores import FAISS
-from langchain_text_splitters import CharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -49,74 +50,6 @@ def extract_citations(pdf_path: str) -> Dict[str, str]:
     except Exception as e:
         logger.error(f"Error extracting citations from {pdf_path}: {str(e)}")
     return cites
-
-
-def create_folder(pdf_path: str) -> str:
-    """Create a folder for storing reference documents."""
-    title = "temp"
-    try:
-        os.makedirs(title, exist_ok=True)
-    except Exception as e:
-        logger.error(f"Error creating folder {title}: {str(e)}")
-        raise
-    return title
-
-
-def download_document(
-    folder: str, title: str, cite: str, client: Client
-) -> Optional[str]:
-    """Download a document from Google Scholar."""
-
-    filename = re.sub(r"\W+", "", cite[5:])
-
-    try:
-        search = client.search({"engine": "google_scholar", "q": title})
-        results = search.as_dict().get("organic_results", [])
-        if not results:
-            logger.warning(f"No results found for {title}")
-            return None
-
-        url = results[0].get("resources", [{}])[0].get("link")
-        if not url:
-            logger.warning(f"No download link found for {title}")
-            return None
-
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-
-        file_path = os.path.join(folder, f"{filename}.pdf")
-        with open(file_path, "wb") as f:
-            f.write(response.content)
-
-        return f"{filename}.pdf"
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error downloading document {title}: {str(e)}")
-    except Exception as e:
-        logger.error(f"Unexpected error while downloading {title}: {str(e)}")
-
-    return None
-
-
-def download_all_documents(folder: str, cites: Dict[str, str]) -> None:
-    api_key = os.environ.get("SERP_API_KEY")
-    if not api_key:
-        logger.error("SERP API key not found in environment variables.")
-        return None
-    client = Client(api_key=api_key)
-    """Download all cited documents."""
-    for cite, title in cites.items():
-        download_document(folder, title, cite, client)
-
-
-def extract_text(file_path: str) -> str:
-    """Extract text from a PDF file."""
-    try:
-        reader = PdfReader(file_path)
-        text = "".join(page.extract_text() for page in reader.pages)
-        return re.sub("\n", " ", text)
-    except Exception as e:
-        logger.error(f"Error extracting text from {file_path}: {str(e)}")
-        return ""
 
 
 def create_summary_prompt(text: str, context: str) -> str:
@@ -215,53 +148,105 @@ def extract_citation_context(
     return cite_dict
 
 
-def initialize_retriever(folder: str) -> Optional[FAISS]:
-    """Initialize a FAISS retriever for document search."""
-    try:
-        docs = [
-            extract_text(os.path.join(folder, file))
-            for file in os.listdir(folder)
-            if file.endswith(".pdf")
-        ]
-        if not docs:
-            logger.warning(f"No PDF documents found in {folder}")
-            return None
-
-        text_splitter = CharacterTextSplitter(
-            chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, separator=" "
-        )
-        texts = text_splitter.create_documents(docs)
-        embeddings = HuggingFaceEmbeddings()
-        db = FAISS.from_documents(texts, embeddings)
-        return db.as_retriever()
-    except Exception as e:
-        logger.error(f"Error initializing retriever for {folder}: {str(e)}")
-        return None
+def chunk(text: str, size: int, overlap: int) -> List[str]:
+    chunks = []
+    gap = size - overlap
+    i = 0
+    while i + gap <= len(text):
+        chunks.append(text[i : i + gap])
+        i += gap
+    if i + gap > len(text):
+        chunks.append(text[i:])
+    return chunks
 
 
-def generate_summaries(
-    folder_path: str, ctx: Dict[str, Dict[int, List[str]]]
+def download_pdf(
+    title: str, headers: Dict[str, str], search_url: str, params: Dict[str, Any]
+) -> bytes:
+    params["q"] = title
+    response = requests.get(search_url, headers=headers, params=params)
+    response.raise_for_status()
+    search_results = response.json()
+
+    pdf_link = next(
+        (
+            link["url"]
+            for link in search_results["webPages"]["value"][0]["deepLinks"]
+            if "pdf" in link["url"]
+        ),
+        None,
+    )
+    if not pdf_link:
+        raise ValueError(f"No PDF link found for title: {title}")
+
+    file_response = requests.get(pdf_link, timeout=30)
+    file_response.raise_for_status()
+    return file_response.content
+
+
+def process_pdf(pdf_content: bytes) -> List[str]:
+    reader = PdfReader(io.BytesIO(pdf_content))
+    text = " ".join(page.extract_text() for page in reader.pages)
+    text = re.sub("\n", " ", text)
+    return chunk(text, CHUNK_SIZE, CHUNK_OVERLAP)
+
+
+def download_and_retrieve(
+    cites: Dict[str, str]
+) -> Tuple[Dict[str, torch.FloatTensor], Dict[str, List[str]]]:
+    key = os.environ.get("BING_API_KEY")
+    if not key:
+        raise ValueError("BING_API_KEY not found in environment variables")
+
+    headers = {"Ocp-Apim-Subscription-Key": key}
+    params = {"textDecorations": True, "textFormat": "HTML"}
+    search_url = "https://api.bing.microsoft.com/v7.0/search"
+    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+    embeds = {}
+    texts = {}
+
+    for cite, title in cites.items():
+        try:
+            pdf_content = download_pdf(title, headers, search_url, params)
+            chunks = process_pdf(pdf_content)
+            doc_embeds = torch.FloatTensor(model.encode(chunks))
+            embeds[cite] = doc_embeds
+            texts[cite] = chunks
+        except Exception as e:
+            logger.error(f"Error processing citation {cite}: {str(e)}")
+
+    return embeds, texts
+
+
+def n_generate_summaries(
+    ctx: Dict[str, Dict[int, List[str]]],
+    embeds: Dict[str, torch.FloatTensor],
+    texts: Dict[str, List[str]],
 ) -> Dict[str, Dict[int, List[str]]]:
-    """Generate summaries for citation contexts."""
     summaries = {}
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
     if not client.api_key:
         logger.error("GROQ API key not found in environment variables.")
         return summaries
 
-    retriever = initialize_retriever(folder_path)
-    if not retriever:
-        logger.error("Failed to initialize retriever.")
-        return summaries
+    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
     for cite, pages in ctx.items():
+        doc_embeds = embeds.get(cite)
+        if doc_embeds is None:
+            logger.warning(f"No embeddings found for citation {cite}")
+            continue
+
         summaries[cite] = {}
         for page, contexts in pages.items():
             summaries[cite][page] = []
             for context in contexts:
                 try:
-                    docs = retriever.get_relevant_documents(context, k=2)
-                    info = str([doc.page_content for doc in docs])
+                    ctx_embeds = model.encode(context)
+                    hits = semantic_search(ctx_embeds, doc_embeds)
+                    relevant_texts = "PLUHHHH"
+                    info = str([texts[cite][hits[0][i]['corpus_id']] for i in range(len(hits[0]))])
                     summary = summarize_paper_with_context(client, context, info)
                     if summary:
                         summaries[cite][page].append(summary)
@@ -283,7 +268,7 @@ def add_annotations(
     cites: Dict[str, str],
     locations: Dict[str, Dict[int, List[List[float]]]],
     summaries: Dict[str, Dict[int, List[str]]],
-) ->Optional[str]:
+) -> Optional[str]:
     """Add annotations to a PDF file."""
     try:
         reader = PdfReader(pdf_path)
