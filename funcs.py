@@ -49,6 +49,7 @@ def extract_citations(pdf_path: str) -> Dict[str, str]:
                     cites[cite] = doc[page_index].get_textbox(rect)
     except Exception as e:
         logger.error(f"Error extracting citations from {pdf_path}: {str(e)}")
+        raise
     return cites
 
 
@@ -78,7 +79,7 @@ def summarize_text(client: Groq, text: str) -> Optional[str]:
         return chat_completion.choices[0].message.content
     except Exception as e:
         logger.error(f"Error summarizing text: {str(e)}")
-        return None
+        raise
 
 
 def summarize_paper_with_context(
@@ -111,6 +112,7 @@ def extract_citation_locations(
                             locs[cite_ref][page_num].append(obj.get("/Rect", []))
     except Exception as e:
         logger.error(f"Error extracting citation locations from {pdf_path}: {str(e)}")
+        raise
 
     return locs
 
@@ -144,6 +146,7 @@ def extract_citation_context(
                             cite_dict[cite_ref][page_num].append(text)
     except Exception as e:
         logger.error(f"Error extracting citation context from {pdf_path}: {str(e)}")
+        raise
 
     return cite_dict
 
@@ -215,6 +218,7 @@ def download_and_retrieve(
             texts[cite] = chunks
         except Exception as e:
             logger.error(f"Error processing citation {cite}: {str(e)}")
+            
 
     return embeds, texts
 
@@ -259,6 +263,7 @@ def n_generate_summaries(
                     logger.error(
                         f"Error generating summary for {cite} on page {page}: {str(e)}"
                     )
+                    raise
 
     return summaries
 
@@ -293,6 +298,7 @@ def add_annotations(
         return "annotated.pdf"
     except Exception as e:
         logger.error(f"Error adding annotations to {pdf_path}: {str(e)}")
+        raise
 
 
 def delete_folder(folder_path):
