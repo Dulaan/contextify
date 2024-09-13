@@ -1,11 +1,17 @@
 import os
 from tkinter import Tk, Entry, Button, Label, Toplevel, mainloop
 from tkinter.filedialog import askopenfile
-from funcs import extract_citations, create_folder, download_all_documents, extract_citation_locations, extract_citation_context, generate_summaries, add_annotations, delete_folder
+from funcs import (
+    extract_citations,
+    download_and_retrieve,
+    n_generate_summaries,
+    add_annotations,
+    extract_citation_context,
+    extract_citation_locations,
+)
 
-
+    
 def main(pdf_path):
-    folder_path = create_folder(pdf_path)
 
     cites = extract_citations(pdf_path)
 
@@ -13,17 +19,15 @@ def main(pdf_path):
     cite, title = list(cites.items())[0]
     cites = {cite: title}
 
-    download_all_documents(folder_path, cites)
-
-    locs = extract_citation_locations(pdf_path, cites)
+    embeds, texts = download_and_retrieve(cites)
 
     ctx = extract_citation_context(pdf_path, cites)
 
-    sums = generate_summaries(folder_path, ctx)
-    print(sums)
-    final = add_annotations(pdf_path, cites, locs, sums)
+    locs = extract_citation_locations(pdf_path, cites)
 
-    delete_folder(folder_path)
+    sums = n_generate_summaries(ctx, embeds, texts)
+
+    final = add_annotations(pdf_path, cites, locs, sums)
 
     print(f'Annotated pdf can be found at "{final}"')
 
@@ -40,9 +44,8 @@ def open_file():
     file = askopenfile(mode="r", filetypes=[("PDF Files", "*.pdf")])
     if file is not None:
         try:
-            os.environ["SERP_API_KEY"] = serp.get()
+            os.environ["BING_API_KEY"] = serp.get()
             os.environ["GROQ_API_KEY"] = groq.get()
-            print(os.environ.get("SERP_API_KEY"), os.environ.get("GROQ_API_KEY"))
             main(file.name)
         except Exception as e:
             top = Toplevel(root)
@@ -51,7 +54,7 @@ def open_file():
             Label(top, text=str(e), font=("Mistral 18 bold")).place(x=150, y=80)
 
 
-Label(root, text="Serp API key").grid(row=0)
+Label(root, text="BING API key").grid(row=0)
 Label(root, text="Groq API key").grid(row=1)
 
 serp = Entry(root)
