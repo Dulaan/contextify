@@ -10,7 +10,7 @@ from sentence_transformers.util import semantic_search
 import pymupdf
 from pypdf import PdfReader, PdfWriter
 from pypdf.annotations import Text
-from serpapi import Client
+import time
 from groq import Groq
 
 
@@ -23,7 +23,7 @@ CHUNK_SIZE = 400
 CHUNK_OVERLAP = 50
 MAX_TOKENS = 1024
 TEMPERATURE = 0.5
-
+CHUNK_N = 2
 
 def extract_citations(pdf_path: str) -> Dict[str, str]:
     """Extract citations from a PDF file."""
@@ -163,6 +163,13 @@ def chunk(text: str, size: int, overlap: int) -> List[str]:
     return chunks
 
 
+def getPdf(response_data):
+    for result in response_data["webPages"]["value"]:
+        if "pdf" in result["url"]:
+            return result["url"]
+    return None
+
+
 def download_pdf(
     title: str, headers: Dict[str, str], search_url: str, params: Dict[str, Any]
 ) -> bytes:
@@ -171,14 +178,7 @@ def download_pdf(
     response.raise_for_status()
     search_results = response.json()
 
-    pdf_link = next(
-        (
-            link["url"]
-            for link in search_results["webPages"]["value"][0]["deepLinks"]
-            if "pdf" in link["url"]
-        ),
-        None,
-    )
+    pdf_link = getPdf(search_results)
     if not pdf_link:
         raise ValueError(f"No PDF link found for title: {title}")
 
@@ -218,7 +218,6 @@ def download_and_retrieve(
             texts[cite] = chunks
         except Exception as e:
             logger.error(f"Error processing citation {cite}: {str(e)}")
-            
 
     return embeds, texts
 
@@ -248,9 +247,13 @@ def n_generate_summaries(
             for context in contexts:
                 try:
                     ctx_embeds = model.encode(context)
-                    hits = semantic_search(ctx_embeds, doc_embeds)
-                    relevant_texts = "PLUHHHH"
-                    info = str([texts[cite][hits[0][i]['corpus_id']] for i in range(len(hits[0]))])
+                    hits = semantic_search(ctx_embeds, doc_embeds, top_k = CHUNK_N)
+                    info = str(
+                        [
+                            texts[cite][hits[0][i]["corpus_id"]]
+                            for i in range(len(hits[0]))
+                        ]
+                    )
                     summary = summarize_paper_with_context(client, context, info)
                     if summary:
                         summaries[cite][page].append(summary)
@@ -259,6 +262,7 @@ def n_generate_summaries(
                         logger.warning(
                             f"Failed to generate summary for {cite} on page {page}"
                         )
+                    time.sleep(3)
                 except Exception as e:
                     logger.error(
                         f"Error generating summary for {cite} on page {page}: {str(e)}"
