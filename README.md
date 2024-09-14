@@ -1,5 +1,5 @@
 # contextify
- Lending context to citations in papers using LLMs
+ Lending context to citations in papers using LLMS and RAG
 
  ## How to Use
 
