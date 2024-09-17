@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 400
 CHUNK_OVERLAP = 50
 MAX_TOKENS = 1024
-TEMPERATURE = 0.5
+TEMPERATURE = 1.0
 CHUNK_N = 2
+
 
 def extract_citations(pdf_path: str) -> Dict[str, str]:
     """Extract citations from a PDF file."""
@@ -65,7 +66,7 @@ def summarize_text(client: Groq, text: str) -> Optional[str]:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a professional summarizer hired to provide context to citations within papers. Use the provided text chunks to explain the citation's relevance to the passage concisely.",
+                    "content": "You are a professional summarizer hired to provide context to citations within papers. Use the provided text chunks to explain the citation's relevance to the passage as concisely as possible.",
                 },
                 {"role": "user", "content": text},
             ],
@@ -247,7 +248,7 @@ def n_generate_summaries(
             for context in contexts:
                 try:
                     ctx_embeds = model.encode(context)
-                    hits = semantic_search(ctx_embeds, doc_embeds, top_k = CHUNK_N)
+                    hits = semantic_search(ctx_embeds, doc_embeds, top_k=CHUNK_N)
                     info = str(
                         [
                             texts[cite][hits[0][i]["corpus_id"]]
@@ -277,7 +278,7 @@ def add_annotations(
     cites: Dict[str, str],
     locations: Dict[str, Dict[int, List[List[float]]]],
     summaries: Dict[str, Dict[int, List[str]]],
-) -> Optional[str]:
+) -> Optional[io.BytesIO]:
     """Add annotations to a PDF file."""
     try:
         reader = PdfReader(pdf_path)
@@ -296,16 +297,16 @@ def add_annotations(
                             text=re.sub("\n", "", summaries[cite][page][i]), rect=rect
                         )
                         writer.add_annotation(page_number=page, annotation=annotation)
-        with open("annotated.pdf", "wb") as fp:
-            writer.write(fp)
-        logger.info("Successfully created annotated PDF.")
-        return "annotated.pdf"
+        pdf_bytes = io.BytesIO()
+        writer.write(pdf_bytes)
+        pdf_bytes.seek(0)
+        return pdf_bytes
     except Exception as e:
         logger.error(f"Error adding annotations to {pdf_path}: {str(e)}")
         raise
 
 
-def delete_folder(folder_path):
-    for file in os.listdir(folder_path):
-        os.remove(folder_path + "/" + file)
-    os.rmdir(folder_path)
+def download_file(pdf_bytes: io.BytesIO, target_path: str):
+    with open(target_path, "rb") as fp:
+        fp.write(pdf_bytes.getbuffer())
+        logger.info(f"annotated pdf saved to {target_path}")
